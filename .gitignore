@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Raw eBird S&T rasters are NEVER committed (huge; live on Box).
+# Only the processed public/data/ assets are versioned + deployed.
+/data-raw/
+
+# OS / editor
+.DS_Store
+*.log
+
+# range-extraction intermediates
+build/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
