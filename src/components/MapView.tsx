@@ -21,7 +21,6 @@ function DeckOverlay(props: MapboxOverlayProps) {
 interface Props {
   answer?: Geometry | null; // revealed overlap region (post-guess only)
   guess?: LngLat | null;
-  revealCenter?: LngLat | null;
   fitBBox?: BBox | null;
   onMapClick?: (ll: LngLat) => void;
 }
@@ -31,7 +30,6 @@ const INITIAL = { longitude: -95, latitude: 44, zoom: 2.6 };
 export default function MapView({
   answer,
   guess,
-  revealCenter,
   fitBBox,
   onMapClick,
 }: Props) {
@@ -93,13 +91,6 @@ export default function MapView({
       {guess && (
         <Marker longitude={guess[0]} latitude={guess[1]} anchor="bottom">
           <div className="text-2xl drop-shadow-lg">📍</div>
-        </Marker>
-      )}
-      {revealCenter && (
-        <Marker longitude={revealCenter[0]} latitude={revealCenter[1]} anchor="center">
-          <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-emerald-400/80 text-xs shadow-lg">
-            ★
-          </div>
         </Marker>
       )}
     </Map>

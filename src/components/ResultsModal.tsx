@@ -12,6 +12,8 @@ interface Props {
   species: SpeciesRow[];
   difficulty: Difficulty;
   dateKey: string;
+  /** S&T week number (1–52) for the abundance-map links. */
+  stWeek: number;
   score: number;
   won: boolean;
   inside: boolean;
@@ -23,8 +25,8 @@ interface Props {
 function ebirdSpecies(code: string) {
   return `https://ebird.org/species/${code}`;
 }
-function macaulayPhotos(code: string) {
-  return `https://media.ebird.org/catalog?taxonCode=${code}&mediaType=photo&sort=rating_rank_desc`;
+function stWeeklyMap(code: string, week: number) {
+  return `https://science.ebird.org/en/status-and-trends/species/${code}/abundance-map-weekly?week=${week}`;
 }
 
 function StatChip({ label, value }: { label: string; value: string | number }) {
@@ -37,7 +39,8 @@ function StatChip({ label, value }: { label: string; value: string | number }) {
 }
 
 export default function ResultsModal(props: Props) {
-  const { species, difficulty, dateKey, score, won, inside, distanceKm, emoji, onClose } = props;
+  const { species, difficulty, dateKey, stWeek, score, won, inside, distanceKm, emoji, onClose } =
+    props;
   const [copied, setCopied] = useState(false);
   const stats: Stats = loadStats();
 
@@ -115,12 +118,12 @@ export default function ResultsModal(props: Props) {
                 </a>
               )}
               <a
-                href={macaulayPhotos(s.code)}
+                href={stWeeklyMap(s.code, stWeek)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-white/50 hover:text-white"
               >
-                Photos&nbsp;↗
+                S&amp;T&nbsp;↗
               </a>
             </li>
           ))}

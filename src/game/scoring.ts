@@ -68,6 +68,21 @@ function distanceToBoundaryKm(pt: LngLat, geom: Geometry): number {
   return min;
 }
 
+/** How far the overlap reaches: max distance (km) from its center to any vertex. */
+function extentRadiusKm(center: LngLat, geom: Geometry): number {
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
+  let max = 0;
+  for (const poly of polys) {
+    for (const ring of poly) {
+      for (const v of ring) {
+        const d = haversineKm(center, v as LngLat);
+        if (d > max) max = d;
+      }
+    }
+  }
+  return max;
+}
+
 /** Ray-cast test: is [lng,lat] inside a single ring (array of [lng,lat])? */
 function inRing(pt: LngLat, ring: number[][]): boolean {
   const [x, y] = pt;
@@ -109,8 +124,7 @@ export interface LocationResult {
 }
 
 // Equal-area radius of one H3 res-4 cell (√(area/π), area ≈ 1770 km²). The union
-// of n cells has area ≈ n·cell-area, so its "range radius" ≈ √n · this — the
-// scale-free yardstick we normalize the miss distance against.
+// of n cells has area ≈ n·cell-area, so its compact "range radius" ≈ √n · this.
 const CELL_RADIUS_KM = 23.74;
 
 // Score falloff in normalized (range-radius) units: score = 100·exp(−norm/SCALE),
@@ -122,7 +136,14 @@ const NORM_SCALE = 1;
 export function scoreLocation(guess: LngLat, answer: PuzzleAnswer): LocationResult {
   const inside = pointInPolygon(guess, answer.poly);
   const distanceKm = inside ? 0 : distanceToBoundaryKm(guess, answer.poly);
-  const rangeRadiusKm = Math.max(1, Math.sqrt(answer.cells) * CELL_RADIUS_KM);
+  // Yardstick = the overlap's own size. Use the LARGER of its compact-area radius
+  // (√cells·cell-radius) and its actual reach (center→farthest vertex), so a long
+  // thin overlap — a coastal strip, say — isn't scored as if it were a tiny disc.
+  const rangeRadiusKm = Math.max(
+    1,
+    Math.sqrt(answer.cells) * CELL_RADIUS_KM,
+    extentRadiusKm(answer.center, answer.poly),
+  );
   const norm = distanceKm / rangeRadiusKm;
   const score = inside ? 100 : Math.round(100 * Math.exp(-norm / NORM_SCALE));
 

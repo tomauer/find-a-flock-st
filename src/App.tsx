@@ -19,6 +19,11 @@ import {
 const WIN_SCORE = 50;
 const DIFF_KEY = 'fafst:difficulty';
 
+// The default framing: all of the US & Canada (incl. Alaska → Newfoundland). The
+// map resets to this on load and whenever the difficulty is switched, so it never
+// pre-zooms to the overlap's neighborhood (which would give the answer away).
+const US_CANADA: BBox = [-168, 23, -53, 71];
+
 const DIFF_LABEL: Record<Difficulty, string> = {
   easy: 'Easy',
   medium: 'Medium',
@@ -63,6 +68,7 @@ export default function App() {
   const [guess, setGuess] = useState<LngLat | null>(null);
   const [result, setResult] = useState<LocationResult | null>(null);
   const [showResults, setShowResults] = useState(false);
+  const [fitBBox, setFitBBox] = useState<BBox | null>(null);
 
   const dateKey = utcDateKey();
 
@@ -95,6 +101,7 @@ export default function App() {
 
   // Restore today's completed puzzle after a refresh (or when switching back to a
   // difficulty already played today); otherwise reset to a fresh, unplayed board.
+  // Either way, frame the whole US & Canada — never the overlap's neighborhood.
   useEffect(() => {
     const saved = puzzle ? loadPlay(dateKey, difficulty) : null;
     if (saved && saved.puzzleId === puzzle!.id) {
@@ -105,29 +112,16 @@ export default function App() {
       setResult(null);
     }
     setShowResults(false);
+    setFitBBox([...US_CANADA] as BBox); // fresh array => MapView re-fits on every toggle
   }, [puzzle, dateKey, difficulty]);
 
   const finished = result !== null;
-
-  // Only frame the map AFTER guessing (pre-guess framing would reveal the spot).
-  const fitBBox: BBox | null = useMemo(() => {
-    if (!finished || !puzzle) return null;
-    const acc: BBox = [Infinity, Infinity, -Infinity, -Infinity];
-    extendBBox(puzzle.answer.poly, acc);
-    if (guess) {
-      acc[0] = Math.min(acc[0], guess[0]);
-      acc[1] = Math.min(acc[1], guess[1]);
-      acc[2] = Math.max(acc[2], guess[0]);
-      acc[3] = Math.max(acc[3], guess[1]);
-    }
-    return acc;
-  }, [finished, puzzle, guess]);
 
   const chooseDifficulty = useCallback(
     (d: Difficulty) => {
       if (d === difficulty) return;
       localStorage.setItem(DIFF_KEY, d);
-      setDifficulty(d); // the rehydrate effect resets or restores the board for `d`
+      setDifficulty(d); // the rehydrate effect resets/restores the board and view for `d`
     },
     [difficulty],
   );
@@ -138,6 +132,14 @@ export default function App() {
     setResult(res);
     savePlay(dateKey, difficulty, { puzzleId: puzzle.id, guess, result: res });
     recordResult({ score: res.score, won: res.score >= WIN_SCORE, dateKey });
+    // Reveal: zoom to the overlap + the guess pin.
+    const acc: BBox = [Infinity, Infinity, -Infinity, -Infinity];
+    extendBBox(puzzle.answer.poly, acc);
+    acc[0] = Math.min(acc[0], guess[0]);
+    acc[1] = Math.min(acc[1], guess[1]);
+    acc[2] = Math.max(acc[2], guess[0]);
+    acc[3] = Math.max(acc[3], guess[1]);
+    setFitBBox(acc);
     setTimeout(() => setShowResults(true), 500);
   }, [puzzle, guess, finished, dateKey, difficulty]);
 
@@ -167,7 +169,6 @@ export default function App() {
       <MapView
         answer={finished && puzzle ? puzzle.answer.poly : null}
         guess={guess}
-        revealCenter={finished && puzzle ? puzzle.answer.center : null}
         fitBBox={fitBBox}
         onMapClick={finished ? undefined : setGuess}
       />
@@ -270,6 +271,7 @@ export default function App() {
           species={species}
           difficulty={difficulty}
           dateKey={dateKey}
+          stWeek={weekData.week + 1}
           score={result.score}
           won={result.score >= WIN_SCORE}
           inside={result.inside}
