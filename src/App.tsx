@@ -4,6 +4,7 @@ import ResultsModal from './components/ResultsModal';
 import { loadManifest, loadWeek } from './data';
 import { currentWeekIndex, pickPuzzle, shortDate, utcDateKey } from './game/dailySeed';
 import { scoreLocation, scoreEmoji, type LocationResult } from './game/scoring';
+import { loadPlay, savePlay } from './game/play';
 import { recordResult } from './game/streaks';
 import {
   DIFFICULTIES,
@@ -92,6 +93,20 @@ export default function App() {
     return pickPuzzle(pool, dateKey);
   }, [weekData, difficulty, dateKey]);
 
+  // Restore today's completed puzzle after a refresh (or when switching back to a
+  // difficulty already played today); otherwise reset to a fresh, unplayed board.
+  useEffect(() => {
+    const saved = puzzle ? loadPlay(dateKey, difficulty) : null;
+    if (saved && saved.puzzleId === puzzle!.id) {
+      setGuess(saved.guess);
+      setResult(saved.result);
+    } else {
+      setGuess(null);
+      setResult(null);
+    }
+    setShowResults(false);
+  }, [puzzle, dateKey, difficulty]);
+
   const finished = result !== null;
 
   // Only frame the map AFTER guessing (pre-guess framing would reveal the spot).
@@ -112,10 +127,7 @@ export default function App() {
     (d: Difficulty) => {
       if (d === difficulty) return;
       localStorage.setItem(DIFF_KEY, d);
-      setDifficulty(d);
-      setGuess(null);
-      setResult(null);
-      setShowResults(false);
+      setDifficulty(d); // the rehydrate effect resets or restores the board for `d`
     },
     [difficulty],
   );
@@ -124,9 +136,10 @@ export default function App() {
     if (!puzzle || !guess || finished) return;
     const res = scoreLocation(guess, puzzle.answer);
     setResult(res);
+    savePlay(dateKey, difficulty, { puzzleId: puzzle.id, guess, result: res });
     recordResult({ score: res.score, won: res.score >= WIN_SCORE, dateKey });
     setTimeout(() => setShowResults(true), 500);
-  }, [puzzle, guess, finished, dateKey]);
+  }, [puzzle, guess, finished, dateKey, difficulty]);
 
   if (error) {
     return (

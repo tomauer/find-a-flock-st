@@ -147,8 +147,10 @@ def quality_for_week(row, week_doy):
     """S&T model quality (0–3) for this species during the week's season.
 
     Residents use the full-year rating. Migrants use the season whose date range
-    contains the week; short gaps between seasons fall back to the full-year
-    rating. Returns None when unknown.
+    contains the week. If the week falls in NO defined season (a gap between a
+    species' seasons — i.e. it isn't modeled to be present then), it is excluded:
+    we return None so the quality gate drops it for that week. Returns None when
+    unknown.
     """
     if row is None:
         return None
@@ -157,7 +159,7 @@ def quality_for_week(row, week_doy):
     for start_c, end_c, q_c in _SEASONS:
         if _in_season(week_doy, _mmdd_to_doy(row[start_c]), _mmdd_to_doy(row[end_c])):
             return _q(row[q_c])
-    return _q(row["FULL_YEAR_QUALITY"])  # transition-week gap
+    return None  # week is outside every defined season -> exclude this species
 
 
 def round_geo(geo, ndp=3):
