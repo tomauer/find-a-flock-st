@@ -173,96 +173,97 @@ export default function App() {
         onMapClick={finished ? undefined : setGuess}
       />
 
-      {/* Top bar */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between p-3">
-        <div className="pointer-events-auto rounded-xl bg-black/55 px-3 py-2 backdrop-blur-md">
-          <div className="text-sm font-bold leading-tight">Find-A-Flock S&amp;T</div>
-          <div className="text-[11px] text-white/60">
-            {dateKey} · week of {shortDate(weekData.date)}
-          </div>
-          <div className="text-[11px] text-white/50">
-            Drawing from {weekData.speciesAvailable.toLocaleString()} well-modeled
-            species this week · US &amp; Canada primarily
-          </div>
-        </div>
-      </div>
-
-      {/* Prompt + difficulty + species list */}
-      <div className="pointer-events-none absolute inset-x-0 top-16 z-20 flex justify-center px-3">
-        <div className="pointer-events-auto w-full max-w-md rounded-xl bg-black/55 px-4 py-3 backdrop-blur-md">
-          {/* Difficulty selector */}
-          <div className="mb-2 grid grid-cols-3 gap-1 rounded-lg bg-white/5 p-1">
-            {DIFFICULTIES.map((d) => (
-              <button
-                key={d}
-                onClick={() => chooseDifficulty(d)}
-                className={
-                  'rounded-md px-2 py-1 text-sm font-medium transition ' +
-                  (d === difficulty
-                    ? 'bg-sky-600 text-white'
-                    : 'text-white/60 hover:text-white')
-                }
-              >
-                {DIFF_LABEL[d]}
-              </button>
-            ))}
-          </div>
-
-          {!puzzle ? (
-            <div className="py-2 text-center text-sm text-white/70">
-              No {DIFF_LABEL[difficulty].toLowerCase()} puzzle this week — try
-              another difficulty.
+      {/* Top HUD — header + controls in one compact card so nothing overlaps or
+          clips on small screens; capped to the viewport and scrollable if needed. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center p-2 sm:p-3">
+        <div className="pointer-events-auto flex max-h-[85vh] w-full max-w-md flex-col overflow-y-auto rounded-xl bg-black/60 backdrop-blur-md">
+          {/* Header */}
+          <div className="flex items-baseline justify-between gap-2 px-3 pt-2.5 sm:px-4">
+            <div className="text-sm font-bold leading-tight">Find-A-Flock S&amp;T</div>
+            <div className="whitespace-nowrap text-[10px] text-white/50">
+              {dateKey} · wk of {shortDate(weekData.date)}
             </div>
-          ) : (
-            <>
-              <div className="mb-2 text-center text-sm text-white/80">
-                {finished
-                  ? 'The overlap — where all five could be seen this week — is highlighted.'
-                  : 'Where do all five overlap this week? Click the map.'}
-              </div>
-              <ul className="space-y-1">
-                {species.map((s) => (
-                  <li key={s.code} className="flex items-center gap-2 text-sm">
-                    <span className="text-white/30">•</span>
-                    <span className="flex-1 truncate">{s.name}</span>
-                  </li>
-                ))}
-              </ul>
-              {!finished && (
-                <p className="mt-1 text-center text-[11px] text-white/40">
-                  {DIFF_BLURB[difficulty]}
-                </p>
-              )}
+          </div>
+          <div className="px-3 pb-2 pt-0.5 text-[10px] leading-tight text-white/40 sm:px-4">
+            {weekData.speciesAvailable.toLocaleString()} well-modeled species this
+            week · US &amp; Canada
+          </div>
 
-              {!finished ? (
+          <div className="px-3 pb-3 sm:px-4">
+            {/* Difficulty selector */}
+            <div className="grid grid-cols-3 gap-1 rounded-lg bg-white/5 p-1">
+              {DIFFICULTIES.map((d) => (
                 <button
-                  onClick={submit}
-                  disabled={!guess}
-                  className="mt-3 w-full rounded-xl bg-sky-600 px-4 py-2 font-semibold enabled:hover:bg-sky-500 disabled:opacity-40"
+                  key={d}
+                  onClick={() => chooseDifficulty(d)}
+                  className={
+                    'rounded-md px-2 py-1 text-sm font-medium transition ' +
+                    (d === difficulty
+                      ? 'bg-sky-600 text-white'
+                      : 'text-white/60 hover:text-white')
+                  }
                 >
-                  {guess ? 'Submit guess' : 'Click the map'}
+                  {DIFF_LABEL[d]}
                 </button>
-              ) : (
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <div className="text-sm">
-                    <span className="text-xl font-bold tabular-nums">{result!.score}</span>
-                    <span className="text-white/50">/100</span>
-                    {!result!.inside && (
-                      <span className="ml-2 text-white/60">
-                        {Math.round(result!.distanceKm).toLocaleString()} km off
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setShowResults(true)}
-                    className="rounded-xl bg-white/10 px-4 py-2 hover:bg-white/20"
-                  >
-                    View result
-                  </button>
+              ))}
+            </div>
+
+            {!puzzle ? (
+              <div className="py-2 text-center text-sm text-white/70">
+                No {DIFF_LABEL[difficulty].toLowerCase()} puzzle this week — try
+                another difficulty.
+              </div>
+            ) : (
+              <>
+                <div className="mt-2 text-center text-[13px] leading-snug text-white/80">
+                  {finished
+                    ? 'The overlap — where all five could be seen this week — is highlighted.'
+                    : 'Where do all five overlap this week? Tap the map.'}
                 </div>
-              )}
-            </>
-          )}
+                <ul className="mt-1.5 space-y-0.5">
+                  {species.map((s) => (
+                    <li key={s.code} className="flex items-center gap-2 text-[13px]">
+                      <span className="text-white/30">•</span>
+                      <span className="flex-1 truncate">{s.name}</span>
+                    </li>
+                  ))}
+                </ul>
+                {!finished && (
+                  <p className="mt-1 text-center text-[11px] text-white/40">
+                    {DIFF_BLURB[difficulty]}
+                  </p>
+                )}
+
+                {!finished ? (
+                  <button
+                    onClick={submit}
+                    disabled={!guess}
+                    className="mt-2.5 w-full rounded-xl bg-sky-600 px-4 py-2 font-semibold enabled:hover:bg-sky-500 disabled:opacity-40"
+                  >
+                    {guess ? 'Submit guess' : 'Tap the map'}
+                  </button>
+                ) : (
+                  <div className="mt-2.5 flex items-center justify-between gap-3">
+                    <div className="text-sm">
+                      <span className="text-xl font-bold tabular-nums">{result!.score}</span>
+                      <span className="text-white/50">/100</span>
+                      {!result!.inside && (
+                        <span className="ml-2 text-white/60">
+                          {Math.round(result!.distanceKm).toLocaleString()} km off
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setShowResults(true)}
+                      className="rounded-xl bg-white/10 px-4 py-2 hover:bg-white/20"
+                    >
+                      View result
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 

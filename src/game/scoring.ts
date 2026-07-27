@@ -123,9 +123,19 @@ export interface LocationResult {
   tier: 0 | 1 | 2 | 3 | 4; // for the share grid / feedback color
 }
 
-// Equal-area radius of one H3 res-4 cell (√(area/π), area ≈ 1770 km²). The union
-// of n cells has area ≈ n·cell-area, so its compact "range radius" ≈ √n · this.
+// Equal-area radius of one H3 cell (√(area/π)). Area is resolution-dependent
+// (res-4 ≈ 1770 km², res-5 ≈ 252 km²), but the union of n cells has area ≈
+// n·cell-area, so its compact "range radius" ≈ √n · this — and √n·cellRadius is
+// (near) invariant to the H3 resolution the ranges were built at.
 const CELL_RADIUS_KM = 23.74;
+
+// Floor on the scoring yardstick (km). Tiny "hard" overlaps can be a single hex a
+// few km across; without a floor, any real-world miss (even a good pinpoint guess
+// on a continent) normalizes to a huge number and collapses to 0. A ~150 km floor
+// reflects how precisely a human can reasonably locate a pinpoint target: land in
+// the right region and you still score. Larger overlaps already exceed it, so easy
+// / medium puzzles are unaffected.
+const MIN_RANGE_RADIUS_KM = 150;
 
 // Score falloff in normalized (range-radius) units: score = 100·exp(−norm/SCALE),
 // where norm = distanceToOverlap / rangeRadius. So ~100 at the edge, ~61 half a
@@ -136,11 +146,12 @@ const NORM_SCALE = 1;
 export function scoreLocation(guess: LngLat, answer: PuzzleAnswer): LocationResult {
   const inside = pointInPolygon(guess, answer.poly);
   const distanceKm = inside ? 0 : distanceToBoundaryKm(guess, answer.poly);
-  // Yardstick = the overlap's own size. Use the LARGER of its compact-area radius
-  // (√cells·cell-radius) and its actual reach (center→farthest vertex), so a long
-  // thin overlap — a coastal strip, say — isn't scored as if it were a tiny disc.
+  // Yardstick = the overlap's own size, floored so tiny targets stay fair. Use the
+  // LARGER of the floor, its compact-area radius (√cells·cell-radius), and its
+  // actual reach (center→farthest vertex), so a long thin overlap — a coastal
+  // strip, say — isn't scored as if it were a tiny disc.
   const rangeRadiusKm = Math.max(
-    1,
+    MIN_RANGE_RADIUS_KM,
     Math.sqrt(answer.cells) * CELL_RADIUS_KM,
     extentRadiusKm(answer.center, answer.poly),
   );
