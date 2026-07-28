@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import MapView from './components/MapView';
 import ResultsModal from './components/ResultsModal';
 import { loadManifest, loadWeek } from './data';
-import { currentWeekIndex, pickPuzzle, shortDate, utcDateKey } from './game/dailySeed';
+import { currentWeekIndex, pickPuzzle, shortDate, todayKey } from './game/dailySeed';
 import { scoreLocation, scoreEmoji, type LocationResult } from './game/scoring';
 import { loadPlay, savePlay } from './game/play';
 import { recordResult } from './game/streaks';
@@ -76,7 +76,7 @@ export default function App() {
   const [showResults, setShowResults] = useState(false);
   const [fitBBox, setFitBBox] = useState<BBox | null>(null);
 
-  const dateKey = utcDateKey();
+  const dateKey = todayKey();
 
   useEffect(() => {
     let cancelled = false;

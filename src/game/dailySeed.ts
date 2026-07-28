@@ -27,9 +27,18 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** UTC date string "YYYY-MM-DD" for a given Date (defaults to now). */
-export function utcDateKey(d: Date = new Date()): string {
-  return d.toISOString().slice(0, 10);
+/**
+ * LOCAL date string "YYYY-MM-DD" for a given Date (defaults to now) — the day
+ * boundary is the player's own midnight, not UTC. A UTC boundary meant an evening
+ * session in the Americas (already "tomorrow" in UTC) got saved under the next
+ * day, so it looked already-solved the following morning. Local dates make the
+ * daily puzzle and its saved play roll over exactly when the player's day does.
+ */
+export function todayKey(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 /** Whole days since the Unix epoch in UTC — used as the permutation cycle index. */
@@ -57,7 +66,7 @@ export function seededPermutation(n: number, seed: number): number[] {
  * The pool is shuffled once per cycle; a new cycle reshuffles with a fresh seed
  * so ordering differs across cycles but stays deterministic per date.
  */
-export function dailyIndex(poolSize: number, dateKey: string = utcDateKey()): number {
+export function dailyIndex(poolSize: number, dateKey: string = todayKey()): number {
   if (poolSize <= 0) return 0;
   const day = epochDay(dateKey);
   const cycle = Math.floor(day / poolSize);
@@ -95,7 +104,7 @@ export function currentWeekIndex(dateKey: string, weekDates: string[]): number {
 }
 
 /** Deterministic daily puzzle pick from a week's pool. */
-export function pickPuzzle<T>(pool: T[], dateKey: string = utcDateKey()): T | null {
+export function pickPuzzle<T>(pool: T[], dateKey: string = todayKey()): T | null {
   if (pool.length === 0) return null;
   return pool[dailyIndex(pool.length, dateKey)];
 }

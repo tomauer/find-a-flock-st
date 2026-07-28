@@ -1,6 +1,6 @@
 // LocalStorage-backed player statistics, streaks, and shareable summaries.
 
-import { utcDateKey } from './dailySeed';
+import { todayKey } from './dailySeed';
 
 const KEY = 'fafst:stats:v2';
 
@@ -48,7 +48,7 @@ function save(stats: Stats): Stats {
 }
 
 /** Was today's daily already completed? Prevents double-counting. */
-export function alreadyPlayedToday(stats: Stats, dateKey = utcDateKey()): boolean {
+export function alreadyPlayedToday(stats: Stats, dateKey = todayKey()): boolean {
   return stats.lastPlayed === dateKey;
 }
 
@@ -59,7 +59,7 @@ export function recordResult(args: {
   dateKey?: string;
 }): Stats {
   const stats = loadStats();
-  const dateKey = args.dateKey ?? utcDateKey();
+  const dateKey = args.dateKey ?? todayKey();
   if (stats.lastPlayed === dateKey) return stats; // idempotent
 
   stats.played += 1;
