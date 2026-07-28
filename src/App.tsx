@@ -18,6 +18,7 @@ import {
 
 const WIN_SCORE = 50;
 const DIFF_KEY = 'fafst:difficulty';
+const COLLAPSE_KEY = 'fafst:collapsed';
 
 // The default framing: all of the US & Canada (incl. Alaska → Newfoundland). The
 // map resets to this on load and whenever the difficulty is switched, so it never
@@ -38,6 +39,10 @@ const DIFF_BLURB: Record<Difficulty, string> = {
 function loadDifficulty(): Difficulty {
   const v = localStorage.getItem(DIFF_KEY);
   return v === 'easy' || v === 'medium' || v === 'hard' ? v : 'medium';
+}
+
+function loadCollapsed(): boolean {
+  return localStorage.getItem(COLLAPSE_KEY) === '1';
 }
 
 /** Bounding box that encloses every coordinate in a geometry (extends `acc`). */
@@ -65,6 +70,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [difficulty, setDifficulty] = useState<Difficulty>(loadDifficulty);
+  const [collapsed, setCollapsed] = useState<boolean>(loadCollapsed);
   const [guess, setGuess] = useState<LngLat | null>(null);
   const [result, setResult] = useState<LocationResult | null>(null);
   const [showResults, setShowResults] = useState(false);
@@ -126,6 +132,14 @@ export default function App() {
     [difficulty],
   );
 
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((c) => {
+      const next = !c;
+      localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
+      return next;
+    });
+  }, []);
+
   const submit = useCallback(() => {
     if (!puzzle || !guess || finished) return;
     const res = scoreLocation(guess, puzzle.answer);
@@ -177,13 +191,64 @@ export default function App() {
           clips on small screens; capped to the viewport and scrollable if needed. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center p-2 sm:p-3">
         <div className="pointer-events-auto flex max-h-[85vh] w-full max-w-md flex-col overflow-y-auto rounded-xl bg-black/60 backdrop-blur-md">
-          {/* Header */}
-          <div className="flex items-baseline justify-between gap-2 px-3 pt-2.5 sm:px-4">
-            <div className="text-sm font-bold leading-tight">Find-A-Flock S&amp;T</div>
-            <div className="whitespace-nowrap text-[10px] text-white/50">
-              {dateKey} · wk of {shortDate(weekData.date)}
+          {/* Header — always visible; the chevron collapses the panel so more of
+              the map is exposed for choosing a spot. */}
+          <div
+            className={
+              'flex items-center justify-between gap-2 px-3 sm:px-4 ' +
+              (collapsed ? 'py-2' : 'pt-2.5')
+            }
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="text-sm font-bold leading-tight">Find-A-Flock S&amp;T</span>
+              {collapsed && (
+                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-white/70">
+                  {DIFF_LABEL[difficulty]}
+                  {finished && result && (
+                    <span className="ml-1 tabular-nums text-white/50">
+                      · {result.score}/100
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {!collapsed && (
+                <span className="whitespace-nowrap text-[10px] text-white/50">
+                  {dateKey} · wk of {shortDate(weekData.date)}
+                </span>
+              )}
+              {collapsed && !finished && guess && (
+                <button
+                  onClick={submit}
+                  className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold hover:bg-sky-500"
+                >
+                  Submit
+                </button>
+              )}
+              <button
+                onClick={toggleCollapsed}
+                aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+                aria-expanded={!collapsed}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  className={'h-4 w-4 transition-transform ' + (collapsed ? '' : 'rotate-180')}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 7l5 5 5-5" />
+                </svg>
+              </button>
             </div>
           </div>
+
+          {!collapsed && (
+            <>
           <div className="px-3 pb-2 pt-0.5 text-[10px] leading-tight text-white/40 sm:px-4">
             {weekData.speciesAvailable.toLocaleString()} well-modeled species this
             week · US &amp; Canada
@@ -264,6 +329,8 @@ export default function App() {
               </>
             )}
           </div>
+            </>
+          )}
         </div>
       </div>
 
