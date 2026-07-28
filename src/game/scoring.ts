@@ -68,14 +68,31 @@ function distanceToBoundaryKm(pt: LngLat, geom: Geometry): number {
   return min;
 }
 
-/** How far the overlap reaches: max distance (km) from its center to any vertex. */
-function extentRadiusKm(center: LngLat, geom: Geometry): number {
+/**
+ * Reach of the LARGEST single patch: max over polygons of (that polygon's own
+ * centroid → its farthest vertex). An overlap can be several disjoint patches;
+ * we measure the biggest patch, NOT the span across the gaps between them —
+ * because a guess is scored against the nearest patch's boundary and any patch
+ * scores 100 inside, so the yardstick should reflect patch SIZE, not how far
+ * apart the patches sit (which would wrongly make a scattered answer lenient).
+ * A long thin single patch (a coastal strip) still gets its full length here.
+ */
+function maxPatchRadiusKm(geom: Geometry): number {
   const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
   let max = 0;
   for (const poly of polys) {
+    const outer = poly[0];
+    if (!outer || outer.length === 0) continue;
+    let cx = 0;
+    let cy = 0;
+    for (const v of outer) {
+      cx += v[0];
+      cy += v[1];
+    }
+    const c: LngLat = [cx / outer.length, cy / outer.length];
     for (const ring of poly) {
       for (const v of ring) {
-        const d = haversineKm(center, v as LngLat);
+        const d = haversineKm(c, v as LngLat);
         if (d > max) max = d;
       }
     }
@@ -147,12 +164,13 @@ export function scoreLocation(guess: LngLat, answer: PuzzleAnswer): LocationResu
   const distanceKm = inside ? 0 : distanceToBoundaryKm(guess, answer.poly);
   // Yardstick = the overlap's own size, floored so tiny targets stay fair. Use the
   // LARGER of the floor, its compact-area radius (√cells·cell-radius), and its
-  // actual reach (center→farthest vertex), so a long thin overlap — a coastal
-  // strip, say — isn't scored as if it were a tiny disc.
+  // largest patch's reach, so a long thin overlap — a coastal strip, say — isn't
+  // scored as if it were a tiny disc, while gaps between disjoint patches don't
+  // inflate it.
   const rangeRadiusKm = Math.max(
     MIN_RANGE_RADIUS_KM,
     Math.sqrt(answer.cells) * CELL_RADIUS_KM,
-    extentRadiusKm(answer.center, answer.poly),
+    maxPatchRadiusKm(answer.poly),
   );
   const norm = distanceKm / rangeRadiusKm;
   const score = inside ? 100 : Math.round(100 * Math.exp(-norm / NORM_SCALE));

@@ -40,7 +40,7 @@ import h3
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
-DEFAULT_CELLS = "build/cells"
+DEFAULT_CELLS = "build/cells5"
 DEFAULT_OUT = "public/data"
 DEFAULT_SEASONS = "st2025_seasons - DATES-6.csv"
 N_WEEKS = 52
@@ -76,16 +76,38 @@ EARTH_KM = 6371.0
 # (ans_*) ~7x, with generous upper bounds. `radius` stays in km (resolution-free).
 TIERS = [
     ("easy",   dict(sp_min=3400, sp_max=48000, ans_min=250, ans_max=6600,
-                    radius=1400, here_min=6, here_cap=28, mode="max")),
+                    radius=1400, here_min=6, here_cap=28, mode="max", div=0.12)),
     ("medium", dict(sp_min=1250, sp_max=8000,  ans_min=70,  ans_max=560,
-                    radius=500, here_min=6, here_cap=30, mode="min")),
+                    radius=500, here_min=6, here_cap=30, mode="min", div=0.35)),
     ("hard",   dict(sp_min=110,  sp_max=1800,  ans_min=4,   ans_max=60,
-                    radius=110, here_min=5, here_cap=24, mode="min")),
+                    radius=110, here_min=5, here_cap=24, mode="min", div=0.35)),
 ]
 
 # Bound the search per tier: after this many target-cell attempts, take whatever
 # puzzles were found (keeps broad-species weeks from churning indefinitely).
 MAX_ATTEMPTS = 600
+
+# Flock diversity (see greedy_flock). Each tier's `div` weight blends taxonomic
+# spread against the overlap-size objective: 0 = old behavior (pure size), 1 =
+# pure spread. A moderate value makes flocks a mix of unlike birds (a duck + a
+# hawk + a sparrow), which is both more interesting and a little harder to locate
+# than five look-alike relatives sharing one habitat. Easy stays low (its whole
+# point is a big, coincident target; strong spread shrinks the overlap below its
+# floor). DIV_CAP saturates the taxon-order gap: past it two species already read
+# as "totally different", so a wildly distant order isn't rewarded over a merely
+# different family (same-family gaps are tens–hundreds).
+DIV_CAP = 2000
+
+# Multipart answer handling (see components / keep_patches). A raw intersection is
+# a few real patches plus a lot of trace-occurrence speckle (a broad range can
+# scatter into hundreds of 1–few-cell specks). We keep a patch only if it's both at
+# least MIN_COMPONENT_CELLS (never a lone pixel) AND at least COMPONENT_FRAC of the
+# LARGEST patch — a relative floor that sheds speckle whether the answer is a huge
+# easy blob or a tiny hard cluster. What survives is capped at MAX_COMPONENTS so the
+# reveal is a handful of real patches, not confetti (else the candidate is dropped).
+MIN_COMPONENT_CELLS = 2
+COMPONENT_FRAC = 0.15
+MAX_COMPONENTS = 6
 
 # Display-geometry cleanup for the answer region (h3 hex unions are jagged &
 # speckled). This affects ONLY the rendered outline — all overlap math runs on
@@ -221,17 +243,18 @@ def answer_geometry(cells):
     return [round(clng, 4), round(clat, 4)], radius
 
 
-def largest_component(cells):
-    """Largest H3-adjacency-connected component of a cell set.
+def components(cells):
+    """All H3-adjacency-connected components of a cell set, largest first.
 
-    Greedy "min" intersections often land in several disjoint patches (the cells
-    common to all five ranges can sit in separate coastal/montane pockets). Showing
-    the full scattered set either looks broken (many specks) or, if bridged by a
-    big display buffer, paints gaps where the species do NOT co-occur. Instead we
-    keep the single biggest contiguous patch: one clean, honest target to click.
+    A "min"-mode intersection often lands in several disjoint patches (the cells
+    common to all five ranges can sit in separate coastal/montane/valley pockets).
+    At res-5 those patches are trustworthy, so we KEEP them all — five species can
+    honestly co-occur in more than one place, and showing every real patch is more
+    truthful than collapsing to one. Callers drop lone-pixel specks and cap the
+    patch count so the reveal stays readable rather than confetti.
     """
     remaining = set(cells)
-    best = set()
+    comps = []
     while remaining:
         seed = next(iter(remaining))
         comp, stack = set(), [seed]
@@ -243,18 +266,41 @@ def largest_component(cells):
                 if nb in remaining:
                     remaining.discard(nb)
                     stack.append(nb)
-        if len(comp) > len(best):
-            best = comp
-    return best
+        comps.append(comp)
+    comps.sort(key=len, reverse=True)
+    return comps
 
 
-def greedy_flock(here, sets, mode):
+def keep_patches(cells):
+    """Real patches of an answer, with trace speckle dropped. Returns the surviving
+    components (largest first) or None if the answer is too fragmented to be one
+    coherent target. See MIN_COMPONENT_CELLS / COMPONENT_FRAC / MAX_COMPONENTS."""
+    comps = components(cells)
+    if not comps:
+        return None
+    thresh = max(MIN_COMPONENT_CELLS, int(COMPONENT_FRAC * len(comps[0])))
+    keep = [c for c in comps if len(c) >= thresh] or [comps[0]]
+    if len(keep) > MAX_COMPONENTS:
+        return None
+    return keep
+
+
+def greedy_flock(here, sets, mode, taxon, div_weight):
     """Pick SPECIES_PER species from `here` (all cover the target cell).
 
-    mode="min": each step choose the species that SHRINKS the running
-    intersection most (smallest resulting overlap) — a pinpoint answer.
-    mode="max": each step choose the species that RETAINS the most overlap
-    (largest resulting intersection) — a broad, forgiving answer.
+    Two objectives are blended at every step:
+      • overlap size — mode="min" SHRINKS the running intersection (pinpoint
+        target), mode="max" RETAINS it (broad, forgiving target);
+      • taxonomic spread — prefer species FAR (in eBird taxonomic order) from
+        those already chosen, so a flock isn't five near-identical, same-habitat
+        relatives. `taxon` maps code -> taxonOrder; same-family species sit within
+        tens–hundreds of each other, different orders thousands apart, so the gap
+        is a good "these look/behave differently" proxy (see DIV_WEIGHT/DIV_CAP).
+
+    The two terms are min-max normalized across the candidate pool at each step
+    (they're in different units — cells vs taxon-order), then blended by DIV_WEIGHT.
+    The first pick has no flockmates to differ from, so it's pure size objective —
+    preserving the old seed behavior (narrowest range for "min", broadest for "max").
 
     Every species in `here` contains the target cell, so the intersection always
     contains it and can never be empty. Returns (chosen_codes, answer_cellset)
@@ -264,13 +310,33 @@ def greedy_flock(here, sets, mode):
     chosen, inter = [], None
     want_max = mode == "max"
     while len(chosen) < SPECIES_PER and pool:
-        best, best_inter, best_size = None, None, None
+        # Score every candidate on both axes for this step.
+        cand = []  # (code, resulting_intersection, size, diversity)
         for code in pool:
             s = sets[code]
             ni = s if inter is None else (inter & s)
-            size = len(ni)
-            if best_size is None or (size > best_size if want_max else size < best_size):
-                best, best_inter, best_size = code, ni, size
+            if chosen:
+                div = min(min(abs(taxon[code] - taxon[c]) for c in chosen), DIV_CAP)
+            else:
+                div = 0
+            cand.append((code, ni, len(ni), div))
+
+        sizes = [c[2] for c in cand]
+        divs = [c[3] for c in cand]
+        s_lo, s_hi = min(sizes), max(sizes)
+        d_lo, d_hi = min(divs), max(divs)
+
+        def _norm(v, lo, hi):
+            return 0.0 if hi == lo else (v - lo) / (hi - lo)
+
+        w = 0.0 if not chosen else div_weight  # first pick: pure size seed
+        best, best_inter, best_good = None, None, None
+        for code, ni, size, div in cand:
+            sn = _norm(size, s_lo, s_hi)
+            size_good = sn if want_max else (1.0 - sn)
+            good = (1.0 - w) * size_good + w * _norm(div, d_lo, d_hi)
+            if best_good is None or good > best_good:
+                best, best_inter, best_good = code, ni, good
         chosen.append(best)
         pool.remove(best)
         inter = best_inter
@@ -292,6 +358,7 @@ def build_tier(name, cfg, wk, recs, rng, pool_size, quality_ok):
     if not eligible:
         return []
     sets = {code: set(recs[code]["weeks"][wk]) for code in eligible}
+    taxon = {code: recs[code]["taxonOrder"] for code in eligible}
 
     inverted: dict[str, list[str]] = {}
     for code in eligible:
@@ -318,17 +385,24 @@ def build_tier(name, cfg, wk, recs, rng, pool_size, quality_ok):
             continue
         if len(here) > cfg["here_cap"]:
             here = rng.sample(here, cfg["here_cap"])
-        chosen, answer = greedy_flock(here, sets, cfg["mode"])
+        chosen, answer = greedy_flock(here, sets, cfg["mode"], taxon, cfg["div"])
         if not chosen or not answer:
             continue
-        # Keep only the biggest contiguous patch, so the revealed target is one
-        # coherent place to click rather than scattered specks across the region.
-        answer = largest_component(answer)
+        # Drop trace speckle, keep the real patches. The answer may be several
+        # disjoint patches (honest co-occurrence in a few places), or None if it's
+        # too scattered to be one coherent target.
+        comps = keep_patches(answer)
+        if not comps:
+            continue
+        answer = set().union(*comps)
         if not (cfg["ans_min"] <= len(answer) <= cfg["ans_max"]):
             continue
-        center, radius = answer_geometry(answer)
-        if radius > cfg["radius"]:  # patch itself is still too sprawling
+        # Compactness is enforced PER PATCH: each patch must be tight (radius cap),
+        # which lets the answer be a few tight patches spread apart without the cap
+        # rejecting it just for the gap between them.
+        if max(answer_geometry(c)[1] for c in comps) > cfg["radius"]:
             continue
+        center, _ = answer_geometry(answer)
         key = frozenset(chosen)
         if key in seen_sets:
             continue
