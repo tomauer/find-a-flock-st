@@ -44,7 +44,7 @@ DEFAULT_CELLS = "build/cells"
 DEFAULT_OUT = "public/data"
 DEFAULT_SEASONS = "st2025_seasons - DATES-6.csv"
 N_WEEKS = 52
-H3_RES = 4
+H3_RES = 5
 
 SPECIES_PER = 5
 
@@ -69,13 +69,18 @@ EARTH_KM = 6371.0
 #   "max" — greedily keep the intersection as LARGE as possible (easy: broad
 #           species, big forgiving target).
 #   "min" — greedily shrink the intersection (medium/hard: pinpoint target).
+# Cell-count bands below are for H3 res-5 (~252.9 km²/cell). They were derived
+# from the res-4 bands by the measured res-4->res-5 scaling: per-species ranges
+# grew ~9.5x (median) at the finer read, while compact overlaps track the ~7x
+# area ratio. So species-breadth bands (sp_*) are scaled ~9x and overlap bands
+# (ans_*) ~7x, with generous upper bounds. `radius` stays in km (resolution-free).
 TIERS = [
-    ("easy",   dict(sp_min=380, sp_max=5000, ans_min=35, ans_max=950,
+    ("easy",   dict(sp_min=3400, sp_max=48000, ans_min=250, ans_max=6600,
                     radius=1400, here_min=6, here_cap=28, mode="max")),
-    ("medium", dict(sp_min=140, sp_max=850,  ans_min=10, ans_max=80,
-                    radius=650, here_min=6, here_cap=30, mode="min")),
-    ("hard",   dict(sp_min=12,  sp_max=200,  ans_min=1,  ans_max=8,
-                    radius=190, here_min=5, here_cap=24, mode="min")),
+    ("medium", dict(sp_min=1250, sp_max=8000,  ans_min=70,  ans_max=560,
+                    radius=500, here_min=6, here_cap=30, mode="min")),
+    ("hard",   dict(sp_min=110,  sp_max=1800,  ans_min=4,   ans_max=60,
+                    radius=110, here_min=5, here_cap=24, mode="min")),
 ]
 
 # Bound the search per tier: after this many target-cell attempts, take whatever
@@ -84,9 +89,11 @@ MAX_ATTEMPTS = 600
 
 # Display-geometry cleanup for the answer region (h3 hex unions are jagged &
 # speckled). This affects ONLY the rendered outline — all overlap math runs on
-# the exact H3 cell sets.
-CLOSE_DEG = 0.42   # morphological close: merge specks/gaps + round the hex corners
-SIMP_DEG = 0.07    # Douglas–Peucker tolerance (~7 km): keep the rounded curve
+# the exact H3 cell sets. Tuned for H3 res-5 cells (~17 km across): a gentle close
+# just merges 1-cell specks and rounds corners, without inflating the outline past
+# the true overlap (the res-4 values were ~3x larger and over-generous).
+CLOSE_DEG = 0.22   # morphological close: merge cells within ~1 gap into one blob
+SIMP_DEG = 0.03    # Douglas–Peucker tolerance (~3 km): keep the rounded curve
 
 
 def load_cells(cells_dir: str):
@@ -214,6 +221,33 @@ def answer_geometry(cells):
     return [round(clng, 4), round(clat, 4)], radius
 
 
+def largest_component(cells):
+    """Largest H3-adjacency-connected component of a cell set.
+
+    Greedy "min" intersections often land in several disjoint patches (the cells
+    common to all five ranges can sit in separate coastal/montane pockets). Showing
+    the full scattered set either looks broken (many specks) or, if bridged by a
+    big display buffer, paints gaps where the species do NOT co-occur. Instead we
+    keep the single biggest contiguous patch: one clean, honest target to click.
+    """
+    remaining = set(cells)
+    best = set()
+    while remaining:
+        seed = next(iter(remaining))
+        comp, stack = set(), [seed]
+        remaining.discard(seed)
+        while stack:
+            c = stack.pop()
+            comp.add(c)
+            for nb in h3.grid_disk(c, 1):
+                if nb in remaining:
+                    remaining.discard(nb)
+                    stack.append(nb)
+        if len(comp) > len(best):
+            best = comp
+    return best
+
+
 def greedy_flock(here, sets, mode):
     """Pick SPECIES_PER species from `here` (all cover the target cell).
 
@@ -287,10 +321,13 @@ def build_tier(name, cfg, wk, recs, rng, pool_size, quality_ok):
         chosen, answer = greedy_flock(here, sets, cfg["mode"])
         if not chosen or not answer:
             continue
+        # Keep only the biggest contiguous patch, so the revealed target is one
+        # coherent place to click rather than scattered specks across the region.
+        answer = largest_component(answer)
         if not (cfg["ans_min"] <= len(answer) <= cfg["ans_max"]):
             continue
         center, radius = answer_geometry(answer)
-        if radius > cfg["radius"]:  # overlap is scattered, not one place
+        if radius > cfg["radius"]:  # patch itself is still too sprawling
             continue
         key = frozenset(chosen)
         if key in seen_sets:
