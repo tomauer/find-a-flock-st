@@ -98,24 +98,11 @@ MAX_ATTEMPTS = 600
 # different family (same-family gaps are tens–hundreds).
 DIV_CAP = 2000
 
-# Multipart answer handling (see components / keep_patches). A raw intersection is
-# a few real patches plus a lot of trace-occurrence speckle (a broad range can
-# scatter into hundreds of 1–few-cell specks). We keep a patch only if it's both at
-# least MIN_COMPONENT_CELLS (never a lone pixel) AND at least COMPONENT_FRAC of the
-# LARGEST patch — a relative floor that sheds speckle whether the answer is a huge
-# easy blob or a tiny hard cluster. What survives is capped at MAX_COMPONENTS so the
-# reveal is a handful of real patches, not confetti (else the candidate is dropped).
-MIN_COMPONENT_CELLS = 2
-COMPONENT_FRAC = 0.15
-MAX_COMPONENTS = 6
-
-# Display-geometry cleanup for the answer region (h3 hex unions are jagged &
-# speckled). This affects ONLY the rendered outline — all overlap math runs on
-# the exact H3 cell sets. Tuned for H3 res-5 cells (~17 km across): a gentle close
-# just merges 1-cell specks and rounds corners, without inflating the outline past
-# the true overlap (the res-4 values were ~3x larger and over-generous).
-CLOSE_DEG = 0.22   # morphological close: merge cells within ~1 gap into one blob
-SIMP_DEG = 0.03    # Douglas–Peucker tolerance (~3 km): keep the rounded curve
+# Answer geometry is the EXACT H3 intersection — no speckle removal, no gap
+# bridging (see build_tier / cells_to_display_geo). `components()` is used only to
+# measure the largest patch's reach for the tier compactness gate; it removes
+# nothing. SIMP_DEG lightly trims redundant boundary vertices for file size.
+SIMP_DEG = 0.03    # Douglas–Peucker tolerance (~3 km): topology-preserving
 
 
 def load_cells(cells_dir: str):
@@ -201,16 +188,23 @@ def round_geo(geo, ndp=3):
 
 
 def cells_to_display_geo(cells):
-    """H3 cell set -> clean, lightweight GeoJSON outline for rendering.
+    """H3 cell set -> faithful GeoJSON outline of exactly those hexagons.
 
-    Morphological close merges the trace-occurrence speckle into coherent blobs;
-    simplify trims the jagged hex boundary. Presentation only — overlap math and
-    scoring use the raw cells / spherical centroid.
+    This is the EXACT union of the present cells — adjacent hexes merge, gaps stay
+    gaps, and scattered cells stay scattered. We do NOT close/dilate the shape:
+    bridging the space between disjoint patches would draw area where the five
+    species do NOT co-occur, which is unfaithful. A light Douglas–Peucker simplify
+    (topology-preserving, so it can't merge separate patches) only trims redundant
+    vertices on the hex boundary for file size. Overlap math and scoring run on the
+    raw cells / spherical centroid regardless.
     """
     geom = shape(h3.cells_to_geo(sorted(cells)))
-    geom = geom.buffer(CLOSE_DEG).buffer(-CLOSE_DEG).simplify(
-        SIMP_DEG, preserve_topology=True)
-    return round_geo(mapping(geom))
+    geom = geom.simplify(SIMP_DEG, preserve_topology=True)
+    # 2 dp ≈ 1.1 km — far finer than a ~17 km res-5 hex, so which cells are shown is
+    # unchanged; it only coarsens the sub-cell outline. Shared vertices of adjacent
+    # hexes round identically (no gaps), and disjoint patches are >1 hex apart so
+    # rounding never bridges them. Roughly a third smaller than 3 dp on disk.
+    return round_geo(mapping(geom), ndp=2)
 
 
 def _haversine_km(a, b):
@@ -246,12 +240,11 @@ def answer_geometry(cells):
 def components(cells):
     """All H3-adjacency-connected components of a cell set, largest first.
 
-    A "min"-mode intersection often lands in several disjoint patches (the cells
-    common to all five ranges can sit in separate coastal/montane/valley pockets).
-    At res-5 those patches are trustworthy, so we KEEP them all — five species can
-    honestly co-occur in more than one place, and showing every real patch is more
-    truthful than collapsing to one. Callers drop lone-pixel specks and cap the
-    patch count so the reveal stays readable rather than confetti.
+    An intersection often lands in several disjoint patches (the cells common to
+    all five ranges can sit in separate coastal/montane/valley pockets, and sparse
+    species scatter widely). We KEEP them all — five species can honestly co-occur
+    in more than one place, so every real patch is shown and scored. This helper is
+    used only to measure the largest patch's reach for the tier compactness gate.
     """
     remaining = set(cells)
     comps = []
@@ -269,20 +262,6 @@ def components(cells):
         comps.append(comp)
     comps.sort(key=len, reverse=True)
     return comps
-
-
-def keep_patches(cells):
-    """Real patches of an answer, with trace speckle dropped. Returns the surviving
-    components (largest first) or None if the answer is too fragmented to be one
-    coherent target. See MIN_COMPONENT_CELLS / COMPONENT_FRAC / MAX_COMPONENTS."""
-    comps = components(cells)
-    if not comps:
-        return None
-    thresh = max(MIN_COMPONENT_CELLS, int(COMPONENT_FRAC * len(comps[0])))
-    keep = [c for c in comps if len(c) >= thresh] or [comps[0]]
-    if len(keep) > MAX_COMPONENTS:
-        return None
-    return keep
 
 
 def greedy_flock(here, sets, mode, taxon, div_weight):
@@ -388,19 +367,22 @@ def build_tier(name, cfg, wk, recs, rng, pool_size, quality_ok):
         chosen, answer = greedy_flock(here, sets, cfg["mode"], taxon, cfg["div"])
         if not chosen or not answer:
             continue
-        # Drop trace speckle, keep the real patches. The answer may be several
-        # disjoint patches (honest co-occurrence in a few places), or None if it's
-        # too scattered to be one coherent target.
-        comps = keep_patches(answer)
-        if not comps:
-            continue
-        answer = set().union(*comps)
+        # FIDELITY FIRST: the answer is the EXACT 5-way intersection — every cell
+        # where all five species are modeled present this week, speckle and all. We
+        # do NOT drop scattered patches, and we do NOT bridge the gaps between them.
+        # Sparse species (e.g. early-migration shorebirds) genuinely co-occur in
+        # scattered pockets, not one tidy blob; showing every real cell — including
+        # the small, far-flung ones — is the whole point. The only gate is the
+        # tier's overlap-SIZE band (below): it selects which flocks make a good
+        # target of that difficulty, without altering the cells we show.
         if not (cfg["ans_min"] <= len(answer) <= cfg["ans_max"]):
             continue
-        # Compactness is enforced PER PATCH: each patch must be tight (radius cap),
-        # which lets the answer be a few tight patches spread apart without the cap
-        # rejecting it just for the gap between them.
-        if max(answer_geometry(c)[1] for c in comps) > cfg["radius"]:
+        # Reject only genuinely globe-spanning answers: the single largest patch
+        # must be tight enough to be a coherent target for this tier. This looks at
+        # the biggest connected patch only (gaps between patches never inflate it)
+        # and removes NOTHING — every intersection cell is still shown and scored.
+        comps = components(answer)
+        if answer_geometry(comps[0])[1] > cfg["radius"]:
             continue
         center, _ = answer_geometry(answer)
         key = frozenset(chosen)
