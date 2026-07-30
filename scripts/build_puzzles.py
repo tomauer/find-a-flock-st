@@ -264,6 +264,28 @@ def components(cells):
     return comps
 
 
+def fill_enclosed_holes(cells):
+    """Close interior single-cell pinholes: add any absent cell whose ALL 6 H3
+    neighbors are present. These are res-5 quantization dropouts inside an
+    otherwise-solid region (the underlying occurrence raster is continuous), not
+    real gaps in the flock. This is deliberately conservative and stays faithful:
+    it requires full enclosure, so it NEVER bridges the space between two separate
+    patches and NEVER pushes the outline outward — it only fills 1-cell holes that
+    are unanimously surrounded by all-five-present cells. Pentagon cells (5
+    neighbors, 12 worldwide) are skipped by the ==6 guard.
+    """
+    present = set(cells)
+    holes = set()
+    for c in present:
+        for nb in h3.grid_disk(c, 1):
+            if nb == c or nb in present or nb in holes:
+                continue
+            ring = [x for x in h3.grid_disk(nb, 1) if x != nb]
+            if len(ring) == 6 and all(x in present for x in ring):
+                holes.add(nb)
+    return present | holes
+
+
 def greedy_flock(here, sets, mode, taxon, div_weight):
     """Pick SPECIES_PER species from `here` (all cover the target cell).
 
@@ -367,6 +389,11 @@ def build_tier(name, cfg, wk, recs, rng, pool_size, quality_ok):
         chosen, answer = greedy_flock(here, sets, cfg["mode"], taxon, cfg["div"])
         if not chosen or not answer:
             continue
+        # Close interior single-cell pinholes (res-5 dropouts fully enclosed by
+        # all-five-present cells). This never bridges separate patches — see
+        # fill_enclosed_holes — so the overlap stays faithful; it just keeps solid
+        # regions from reading as a wire mesh.
+        answer = fill_enclosed_holes(answer)
         # FIDELITY FIRST: the answer is the EXACT 5-way intersection — every cell
         # where all five species are modeled present this week, speckle and all. We
         # do NOT drop scattered patches, and we do NOT bridge the gaps between them.
